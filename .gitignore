@@ -1,0 +1,33 @@
+# editors and ides
+.idea/
+.vscode/
+*.swp
+
+# agents
+.agents/
+.codex/
+*.code-workspace/
+.codex-workflows/
+
+# misc
+.DS_Store
+
+# dependencies
+node_modules/
+
+# build outputs
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# logs
+*.log*
+
+# environment variables
+.env
+.env*.local
+.env*.production
+
+# scripts
+*.sh*
