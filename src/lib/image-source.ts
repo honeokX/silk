@@ -1,9 +1,9 @@
-import { IMAGE_APIS, IMAGE_JSON_APIS } from '@/config'
+import { imageApis, imageJsonApis } from '@/config'
 
 type ImageSource = { kind: 'direct' | 'json'; api: string }
 
-const IMAGE_EXTENSIONS = /\.(?:jpe?g|png|webp|gif|avif)$/i
-const JSON_TIMEOUT_MS = 10_000
+const imageExtensions = /\.(?:jpe?g|png|webp|gif|avif)$/i
+const jsonTimeoutMs = 10_000
 
 function findImageUrl(value: unknown): string | null {
   const queue: unknown[] = [value]
@@ -14,8 +14,8 @@ function findImageUrl(value: unknown): string | null {
     if (typeof item === 'string') {
       try {
         const url = new URL(item)
-        if ((url.protocol === 'http:' || url.protocol === 'https:') && IMAGE_EXTENSIONS.test(url.pathname)) {
-          return url.toString()
+        if ((url.protocol === 'http:' || url.protocol === 'https:') && imageExtensions.test(url.pathname)) {
+          return item
         }
       } catch {
         // A non-URL string may be ordinary JSON metadata.
@@ -38,27 +38,35 @@ function withCacheBuster(api: string): string {
 
 function buildImageSources(): ImageSource[] {
   return [
-    ...IMAGE_APIS.map((api) => ({ kind: 'direct' as const, api })),
-    ...IMAGE_JSON_APIS.map((api) => ({ kind: 'json' as const, api })),
+    ...imageApis.map((api) => ({ kind: 'direct' as const, api })),
+    ...imageJsonApis.map((api) => ({ kind: 'json' as const, api })),
   ]
 }
 
-async function resolveJsonImageUrl(api: string, signal: AbortSignal): Promise<string | null> {
+async function resolveJsonImageUrl(api: string, signal: AbortSignal, timeoutMs: number): Promise<string | null> {
+  if (signal.aborted) return null
   const controller = new AbortController()
-  const abort = () => controller.abort()
-  const timeout = window.setTimeout(abort, JSON_TIMEOUT_MS)
+  let rejectTimeout: ((error: Error) => void) | undefined
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    rejectTimeout = reject
+  })
+  const abort = () => {
+    controller.abort()
+    rejectTimeout?.(new Error('JSON image request timed out'))
+  }
+  const timeout = window.setTimeout(abort, timeoutMs)
   signal.addEventListener('abort', abort, { once: true })
 
   try {
-    const response = await fetch(withCacheBuster(api), { cache: 'no-store', signal: controller.signal })
-    if (!response.ok) return null
-    const data: unknown = await response.json()
-    const imageUrl = findImageUrl(data)
-    if (!imageUrl) return null
-
-    const url = new URL(imageUrl)
-    if (window.location.protocol === 'https:' && url.protocol === 'http:') url.protocol = 'https:'
-    return url.toString()
+    return await Promise.race([
+      (async () => {
+        const response = await fetch(withCacheBuster(api), { cache: 'no-store', signal: controller.signal })
+        if (!response.ok) return null
+        const data: unknown = await response.json()
+        return findImageUrl(data)
+      })(),
+      timeoutPromise,
+    ])
   } catch {
     return null
   } finally {
@@ -68,16 +76,22 @@ async function resolveJsonImageUrl(api: string, signal: AbortSignal): Promise<st
 }
 
 // Each source is drawn at most once per round. Image validation happens in the viewer with new Image().
-export async function* randomCandidateImageUrlsForRound(signal: AbortSignal): AsyncGenerator<string> {
+export async function* randomCandidateImageUrlsForRound(
+  signal: AbortSignal,
+  deadline = Number.POSITIVE_INFINITY,
+): AsyncGenerator<string> {
   const remainingSources = buildImageSources()
 
   while (remainingSources.length > 0) {
-    if (signal.aborted) return
+    if (signal.aborted || Date.now() >= deadline) return
     const sourceIndex = Math.floor(Math.random() * remainingSources.length)
     const [source] = remainingSources.splice(sourceIndex, 1)
 
     try {
-      const url = source.kind === 'direct' ? withCacheBuster(source.api) : await resolveJsonImageUrl(source.api, signal)
+      const url =
+        source.kind === 'direct'
+          ? withCacheBuster(source.api)
+          : await resolveJsonImageUrl(source.api, signal, Math.min(jsonTimeoutMs, deadline - Date.now()))
 
       if (url) yield url
     } catch {

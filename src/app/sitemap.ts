@@ -1,12 +1,12 @@
 import type { MetadataRoute } from 'next'
-import { SITE } from '@/config'
+import { site } from '@/config'
 
 export const dynamic = 'force-static'
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
-      url: SITE.url,
+      url: site.url,
     },
   ]
 }

@@ -1,13 +1,13 @@
 import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
 import type { ReactNode } from 'react'
-import { ANALYTICS, SITE } from '@/config'
+import { analytics, site } from '@/config'
 import '@/styles/global.css'
 
 export const metadata: Metadata = {
-  title: SITE.title,
-  description: SITE.description,
-  icons: { icon: SITE.logo },
+  title: site.title,
+  description: site.description,
+  icons: { icon: site.logo },
 }
 
 export const viewport: Viewport = {
@@ -18,10 +18,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang={SITE.lang}>
+    <html lang={site.lang}>
       <body>
         {children}
-        {ANALYTICS !== null && <Script src={ANALYTICS.src} data-website-id={ANALYTICS.websiteId} />}
+        {analytics !== null && <Script src={analytics.src} data-website-id={analytics.websiteId} />}
       </body>
     </html>
   )

@@ -1,23 +1,26 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SITE } from '@/config'
+import { site } from '@/config'
 import { randomCandidateImageUrlsForRound } from '@/lib/image-source'
 
 type ViewerStatus = 'loading-first' | 'loading-next' | 'ready' | 'error-first' | 'error-next'
 
-const PRELOAD_TIMEOUT_MS = 12_000
+const preloadTimeoutMs = 12_000
+const roundTimeoutMs = 30_000
+const imageUrls = new WeakMap<HTMLImageElement, string>()
 
-function preloadImage(url: string, signal: AbortSignal): Promise<HTMLImageElement> {
+function preloadImage(url: string, signal: AbortSignal, timeoutMs: number): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image()
+    imageUrls.set(image, url)
     image.className = 'stage-image'
-    image.alt = SITE.title
+    image.alt = site.title
     image.decoding = 'async'
 
     const cleanup = () => {
       window.clearTimeout(timeout)
-      signal.removeEventListener('abort', abort)
+      signal.removeEventListener('abort', fail)
       image.onload = null
       image.onerror = null
     }
@@ -26,8 +29,7 @@ function preloadImage(url: string, signal: AbortSignal): Promise<HTMLImageElemen
       image.src = ''
       reject(new Error('Image failed to load'))
     }
-    const abort = () => fail()
-    const timeout = window.setTimeout(fail, PRELOAD_TIMEOUT_MS)
+    const timeout = window.setTimeout(fail, timeoutMs)
 
     image.onload = () => {
       cleanup()
@@ -35,7 +37,7 @@ function preloadImage(url: string, signal: AbortSignal): Promise<HTMLImageElemen
       else reject(new Error('Image is empty'))
     }
     image.onerror = fail
-    signal.addEventListener('abort', abort, { once: true })
+    signal.addEventListener('abort', fail, { once: true })
     if (signal.aborted) {
       fail()
       return
@@ -44,10 +46,14 @@ function preloadImage(url: string, signal: AbortSignal): Promise<HTMLImageElemen
   })
 }
 
-async function loadRandomAvailableImage(signal: AbortSignal): Promise<HTMLImageElement | null> {
-  for await (const url of randomCandidateImageUrlsForRound(signal)) {
+async function loadRandomAvailableImage(signal: AbortSignal, currentUrl?: string): Promise<HTMLImageElement | null> {
+  const deadline = Date.now() + roundTimeoutMs
+  for await (const url of randomCandidateImageUrlsForRound(signal, deadline)) {
+    if (url === currentUrl) continue
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return null
     try {
-      return await preloadImage(url, signal)
+      return await preloadImage(url, signal, Math.min(preloadTimeoutMs, remaining))
     } catch {
       if (signal.aborted) return null
     }
@@ -71,7 +77,8 @@ export default function ImageViewer() {
 
     const controller = new AbortController()
     controllerRef.current = controller
-    const pending = loadRandomAvailableImage(controller.signal)
+    const currentUrl = displayedRef.current ? imageUrls.get(displayedRef.current) : undefined
+    const pending = loadRandomAvailableImage(controller.signal, currentUrl)
       .then((image) => {
         if (!controller.signal.aborted && image) readyRef.current = image
         return controller.signal.aborted ? null : image
@@ -132,11 +139,11 @@ export default function ImageViewer() {
     }
   }, [loadAndShowNextImage])
 
-  const loading = status === 'loading-first' || status === 'loading-next'
+  const isLoading = status === 'loading-first' || status === 'loading-next'
   const message =
     status === 'error-first' || status === 'error-next'
       ? '图片加载失败，请重试'
-      : loading
+      : isLoading
         ? status === 'loading-first'
           ? '正在加载图片'
           : '正在加载下一张'
@@ -144,15 +151,15 @@ export default function ImageViewer() {
 
   return (
     <>
-      <div className="image-stage" aria-busy={loading}>
+      <div className="image-stage" aria-busy={isLoading}>
         <div className="image-host" ref={imageHostRef} />
       </div>
       <div className="tips" role="status">
         {message}
       </div>
       <div className="actions">
-        <button type="button" onClick={loadAndShowNextImage} disabled={loading}>
-          {loading ? '加载中' : '下一张'}
+        <button type="button" onClick={loadAndShowNextImage} disabled={isLoading}>
+          {isLoading ? '加载中' : '下一张'}
         </button>
       </div>
     </>
