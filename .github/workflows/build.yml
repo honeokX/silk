@@ -30,12 +30,6 @@ jobs:
           install: false
           cache: true
 
-      - name: Setup node
-        uses: actions/setup-node@v7
-        with:
-          node-version: lts/*
-          package-manager-cache: false
-
       - name: Install dependencies and build
         run: |
           set -eExo pipefail
